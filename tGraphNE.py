@@ -33,7 +33,7 @@ class tGraphNE(object):
         print("Learn embeddings...")   
         
         #walks = [map(str, walk) for walk in walks]        
-        word2vec_model = Word2Vec(sentences = walks, size= dimensions, window= window_size, min_count=0, sg=1, hs=1, workers= workers)
+        word2vec_model = Word2Vec(sentences = walks, vector_size= dimensions, window= window_size, min_count=0, sg=1, hs=1, workers= workers)
         t3 = time.time()
         print("Learn embeddings time:", t3-t2) 
         
@@ -164,11 +164,13 @@ class tGraphNE(object):
         
         
     def get_next_step(self, cur, prevtime=0):
+        return self.GetNextEdgeWithStrategies(cur, prevtime)
+        
+    def GetNextEdgeWithStrategies(self, cur, prevtime=0, gas_price_biased="gas_uniform"):
         """
-        功能：给定一个当前随机游走到的结点cur，这个两个相连的结点（可能有多条边），得出
-        输出：
-        #return J, q
-        直接输出下一个节点，以及时间戳
+        Modularized function to select the next edge using various walking strategies.
+        This allows easy injection of the Gas Price variable later without refactoring
+        the entire graph traversal logic.
         """
         G = self.G
         
@@ -177,6 +179,7 @@ class tGraphNE(object):
         tmp_time = []
         unnormalized_probs_t = []
         unnormalized_probs_a = []
+        unnormalized_probs_g = [] # Placeholder for Gas Price probabilities
 
         cur_nbrs = list(G.neighbors(cur))
         if self.time_biased_type == "simple_graph": #DeepWalk
@@ -203,6 +206,8 @@ class tGraphNE(object):
                     
                     elif t >= prevtime:
                         unnormalized_probs_a.append(a)
+                        # Add logic for Gas Price here later
+                        unnormalized_probs_g.append(1) 
                         
                         if self.time_biased_type == "time_uniform"  :
                             unnormalized_probs_t.append(1)
@@ -217,21 +222,22 @@ class tGraphNE(object):
                         tmp_key.append(k)
                         
 
-            if self.time_biased_type == "time_close_linear" :
-                unnormalized_probs_t = linear_rank_mapping( unnormalized_probs_t, order='descending' )
-            elif self.time_biased_type == "time_far_linear" :
-                unnormalized_probs_t = linear_rank_mapping( unnormalized_probs_t)   
-            elif self.time_biased_type == "time_freq_tanh":
-                unnormalized_probs_t = tanh(unnormalized_probs_t)
-            elif self.time_biased_type == "time_close_exp":
-                unnormalized_probs_t = softmax(unnormalized_probs_t)
+            if len(unnormalized_probs_t) > 0:
+                if self.time_biased_type == "time_close_linear" :
+                    unnormalized_probs_t = linear_rank_mapping( unnormalized_probs_t, order='descending' )
+                elif self.time_biased_type == "time_far_linear" :
+                    unnormalized_probs_t = linear_rank_mapping( unnormalized_probs_t)   
+                elif self.time_biased_type == "time_freq_tanh":
+                    unnormalized_probs_t = tanh(unnormalized_probs_t)
+                elif self.time_biased_type == "time_close_exp":
+                    unnormalized_probs_t = softmax(unnormalized_probs_t)
 
-            if self.amount_biased == "amount_linear":
-                unnormalized_probs_a = linear_rank_mapping(unnormalized_probs_a)
-            elif self.amount_biased == "amount_tanh":
-                unnormalized_probs_a = tanh(unnormalized_probs_a)
-            elif self.amount_biased == "amount_exp":
-                unnormalized_probs_a = softmax(unnormalized_probs_a)
+                if self.amount_biased == "amount_linear":
+                    unnormalized_probs_a = linear_rank_mapping(unnormalized_probs_a)
+                elif self.amount_biased == "amount_tanh":
+                    unnormalized_probs_a = tanh(unnormalized_probs_a)
+                elif self.amount_biased == "amount_exp":
+                    unnormalized_probs_a = softmax(unnormalized_probs_a)
 
             
             if len(unnormalized_probs_t) > 0: #有符合条件的下一个点
@@ -240,6 +246,11 @@ class tGraphNE(object):
                 else:
                     unnormalized_probs = unnormalized_probs_t
                     
+                self.last_probs = unnormalized_probs
+                self.last_nbrs = tmp_node
+                self.last_amounts = unnormalized_probs_a
+                self.last_times = unnormalized_probs_t
+                
                 selected = weight_choice(unnormalized_probs)               
                 next_node = tmp_node[selected]  
                 next_time = tmp_time[selected]        

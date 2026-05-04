@@ -15,7 +15,8 @@ def LP(dataset, emb_file, edge_score_mode):
 
     emb_matrix = load_embeddings(emb_file)
     
-    pklfile_train_test_split = dataset + "_train_test_split_0.5.pickle"
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    pklfile_train_test_split = os.path.join(script_dir, dataset + "_train_test_split_0.5.pickle")
     if os.path.exists(pklfile_train_test_split):    
         with open( pklfile_train_test_split,"rb") as f:     
             train_test_split = pickle.load(f)
