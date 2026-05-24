@@ -11,7 +11,7 @@ import networkx as nx
 import pickle as pickle
 
 class tGraph(object):
-    def __init__( self, file_, filetype, output_Gpkl=False ):
+    def __init__( self, file_, filetype, output_Gpkl=False, exclude_failed=False ):
         self.G = nx.MultiDiGraph() 
         self.min_time = sys.maxsize
         self.max_time = 0
@@ -50,16 +50,34 @@ class tGraph(object):
             elif filetype == "pkl_f":
                 with open( file_,"rb") as f: 
                     df_in = pickle.load(f)            
+                
+                has_gas = 'Gas' in df_in.columns
+                has_friction = 'Friction' in df_in.columns
+                has_gas_limit = 'GasLimit' in df_in.columns
+                has_is_failed = 'IsFailed' in df_in.columns
+                
                 for i in df_in.index:
                     x = str(int(df_in.From[i]))
                     y = str(int(df_in.To[i]))
                     t = int(df_in.TimeStamp[i])
                     a = df_in.Value[i]
                     
+                    gas = df_in.Gas[i] if has_gas else 1.0
+                    fric = df_in.Friction[i] if has_friction else 1.0
+                    gas_limit = df_in.GasLimit[i] if has_gas_limit else 21000.0
+                    is_failed = int(df_in.IsFailed[i]) if has_is_failed else 0
+                    
+                    if exclude_failed and is_failed == 1:
+                        continue
+                    
                     if self.G.has_edge(x,y,t):
                         self.G[x][y][t]['weight'] += a                        
+                        self.G[x][y][t]['gas'] = gas
+                        self.G[x][y][t]['friction'] = fric
+                        self.G[x][y][t]['gas_limit'] = gas_limit
+                        self.G[x][y][t]['is_failed'] = is_failed
                     else:    
-                        self.G.add_edge(x,y,key=t, weight=a)     
+                        self.G.add_edge(x,y,key=t, weight=a, gas=gas, friction=fric, gas_limit=gas_limit, is_failed=is_failed)     
                         
                     edge_key = edge_key + 1                     
                     if t < self.min_time:

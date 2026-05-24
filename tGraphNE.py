@@ -15,7 +15,7 @@ from weight_choice import weight_choice
 
 class tGraphNE(object):
     
-    def __init__(self, tG,  time_biased_type, first_biased_type, amount_biased, alpha,  dimensions, num_walks, walk_length, output, output_pklG = False, window_size=10, workers=8, hs=1):
+    def __init__(self, tG,  time_biased_type, first_biased_type, amount_biased, alpha,  dimensions, num_walks, walk_length, output, output_pklG = False, window_size=10, workers=8, hs=1, gas_biased=None, gamma=0.0):
         self.G = tG.G
         self.min_time = tG.min_time
         self.max_time = tG.max_time
@@ -23,7 +23,9 @@ class tGraphNE(object):
         self.time_biased_type = time_biased_type # choice = "unbiased", "amount-weighted" "linear", "exp"
         self.first_biased_type = first_biased_type    
         self.amount_biased = amount_biased
+        self.gas_biased = gas_biased
         self.alpha = alpha
+        self.gamma = gamma
         print("Walking...")
         t1 = time.time()
         walks = self.simulate_walks(num_walks, walk_length)#随机游走
@@ -206,8 +208,10 @@ class tGraphNE(object):
                     
                     elif t >= prevtime:
                         unnormalized_probs_a.append(a)
-                        # Add logic for Gas Price here later
-                        unnormalized_probs_g.append(1) 
+                        if self.gas_biased == "friction_inverse":
+                            unnormalized_probs_g.append(G[cur][nbr][k].get('friction', 1.0))
+                        else:
+                            unnormalized_probs_g.append(1) 
                         
                         if self.time_biased_type == "time_uniform"  :
                             unnormalized_probs_t.append(1)
@@ -238,10 +242,17 @@ class tGraphNE(object):
                     unnormalized_probs_a = tanh(unnormalized_probs_a)
                 elif self.amount_biased == "amount_exp":
                     unnormalized_probs_a = softmax(unnormalized_probs_a)
+                
+                if self.gas_biased == "friction_inverse" and len(unnormalized_probs_g) > 0:
+                    max_f = max(unnormalized_probs_g)
+                    if max_f == 0: max_f = 1.0
+                    unnormalized_probs_g = [max(1e-6, 1.0 - (f / max_f)) for f in unnormalized_probs_g]
 
             
             if len(unnormalized_probs_t) > 0: #有符合条件的下一个点
-                if self.amount_biased != "amount_uniform":
+                if self.gas_biased == "friction_inverse":
+                    unnormalized_probs = combine_probs(unnormalized_probs_t, unnormalized_probs_a, self.alpha, unnormalized_probs_g, self.gamma)
+                elif self.amount_biased != "amount_uniform":
                     unnormalized_probs = combine_probs(unnormalized_probs_t, unnormalized_probs_a, self.alpha)        
                 else:
                     unnormalized_probs = unnormalized_probs_t
@@ -272,18 +283,26 @@ def linear_rank_mapping( original_array, order='ascending' ):
 def normalized_probs(unnormalized_probs):
     if len(unnormalized_probs) > 0: #有符合条件的下一个点
         norm_const = sum(unnormalized_probs)
+        if norm_const == 0: norm_const = 1.0
         normalized_probs = [ u_prob / norm_const for u_prob in unnormalized_probs] #归一化  
+    else:
+        normalized_probs = []
 
     return normalized_probs    
     
-def combine_probs(p1, p2, alpha) :
+def combine_probs(p1, p2, alpha, p3=None, gamma=None) :
     probs1 = normalized_probs(p1)
     probs2 = normalized_probs(p2)
 
     if len(probs1) != len(probs2):
         print("ERROR", "len(probs1) != len(probs2)" )
-                          
-    combine_probs = np.multiply( np.power(probs1, alpha), np.power(probs2, 1-alpha) )        
+
+    if p3 is not None and gamma is not None:
+        probs3 = normalized_probs(p3)
+        beta = 1.0 - alpha - gamma
+        combine_probs = np.multiply( np.multiply(np.power(probs1, alpha), np.power(probs2, beta)), np.power(probs3, gamma) )
+    else:                          
+        combine_probs = np.multiply( np.power(probs1, alpha), np.power(probs2, 1-alpha) )        
     
     return combine_probs
 
